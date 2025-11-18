@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BrPacks · Auto Installer Linux</title>
+    <link rel="stylesheet" href="./styles/main.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__content">
+        <p class="tag">Beta</p>
+        <h1>BrPacks · Monte seu instalador para Linux</h1>
+        <p class="subtitle">
+          Escolha aplicativos, defina o gerenciador (APT, Snap ou Flatpak),
+          selecione a versão desejada e gere um script <code>.sh</code> pronto
+          para automatizar a instalação em qualquer máquina.
+        </p>
+        <div class="hero__actions">
+          <button id="generate-script" class="primary">Gerar Script</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="app">
+      <section class="panel">
+        <header class="panel__header">
+          <div>
+            <h2>Catálogo</h2>
+            <p>Selecione os apps e escolha o método suportado.</p>
+          </div>
+          <button id="clear-selection" class="ghost small">Limpar</button>
+        </header>
+        <div class="search-bar">
+          <input
+            type="search"
+            id="search-input"
+            placeholder="Pesquise por nome ou descrição..."
+            spellcheck="false"
+          />
+        </div>
+        <div id="catalog" class="catalog"></div>
+        <div id="empty-state" class="empty-state hidden">
+          Nenhum app encontrado para essa busca.
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Construído para demonstrar automação rápida de provisionamento. Ajuste o
+        catálogo em <code>src/scripts/catalog</code>.
+      </p>
+    </footer>
+
+    <div id="script-modal" class="modal" role="dialog" aria-modal="true">
+      <div class="modal__content">
+        <header class="modal__header">
+          <div>
+            <h2>Script gerado</h2>
+            <p>Revise antes de executar. Copie ou baixe.</p>
+          </div>
+          <button id="close-modal" aria-label="Fechar modal">&times;</button>
+        </header>
+        <textarea
+          id="script-output"
+          class="script-output"
+          spellcheck="false"
+          placeholder="Selecione aplicativos e clique em &quot;Gerar Script&quot;."
+        ></textarea>
+        <div class="modal__actions">
+          <button id="copy-script" class="ghost" disabled>Copiar</button>
+          <button id="download-script" class="primary" disabled>Baixar .sh</button>
+        </div>
+        <p class="hint">
+          Dica: torne o arquivo executável com
+          <code>chmod +x installer.sh</code> e execute com
+          <code>./installer.sh</code>.
+        </p>
+      </div>
+    </div>
+
+    <script
+      src="https://code.jquery.com/jquery-3.7.1.min.js"
+      integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
+      crossorigin="anonymous"
+    ></script>
+    <script type="module" src="./scripts/app.js"></script>
+  </body>
+</html>
