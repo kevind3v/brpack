@@ -12,6 +12,14 @@ const state = {
 
 const appIndex = new Map();
 
+function dependenciesSatisfied(app) {
+  const deps = app?.dependencies ?? [];
+  if (!deps.length) {
+    return true;
+  }
+  return deps.every((depId) => state.selections.has(depId));
+}
+
 const dom = {};
 
 async function init() {
@@ -241,7 +249,9 @@ function toggleAppSelection(appId, enabled) {
     $card.removeClass("selected");
   }
 
+  enforceDependencies();
   refreshControls();
+  renderCatalog(state.filter);
 }
 
 function renderCatalog() {
@@ -249,25 +259,41 @@ function renderCatalog() {
   const fragments = [];
 
   state.catalog.forEach((category) => {
-    const apps = category.apps.filter((app) =>
-      !term
-        ? true
-        : app.name.toLowerCase().includes(term) ||
-          app.description.toLowerCase().includes(term)
+    const visibleApps = category.apps.filter((app) => {
+      if (!term) return true;
+      return (
+        app.name.toLowerCase().includes(term) ||
+        app.description.toLowerCase().includes(term)
+      );
+    });
+
+    const baseApps = visibleApps.filter(
+      (app) => !(app.dependencies && app.dependencies.length)
+    );
+    const dependentApps = visibleApps.filter(
+      (app) => app.dependencies && app.dependencies.length
     );
 
-    if (!apps.length) {
-      return;
+    const built = buildCategory(
+      category.title,
+      category.icon,
+      baseApps,
+      dependentApps
+    );
+    if (built) {
+      fragments.push(built);
     }
-
-    fragments.push(buildCategory(category.title, category.icon, apps));
   });
 
   dom.$catalog.empty().append(fragments);
   toggleEmptyState(fragments.length === 0);
 }
 
-function buildCategory(title, categoryIcon, apps) {
+function buildCategory(title, categoryIcon, baseApps, dependentApps) {
+  if (baseApps.length === 0 && dependentApps.length === 0) {
+    return null;
+  }
+
   const $category = $(`
     <div class="category" data-category="${escapeHtml(title)}">
       <div class="category__header">
@@ -282,11 +308,60 @@ function buildCategory(title, categoryIcon, apps) {
   `);
 
   const $apps = $category.find(".apps");
-  apps.forEach((app) => {
-    $apps.append(buildAppCard(app));
+  const rendered = new Set();
+  const dependentsMap = new Map();
+
+  dependentApps.forEach((app) => {
+    (app.dependencies ?? []).forEach((depId) => {
+      if (!dependentsMap.has(depId)) {
+        dependentsMap.set(depId, []);
+      }
+      dependentsMap.get(depId).push(app);
+    });
+  });
+
+  baseApps.forEach((app) => {
+    appendAppCard(app, $apps, rendered, dependentsMap);
+  });
+
+  // Fallback: render any remaining dependents whose dependencies are satisfied
+  dependentApps.forEach((app) => {
+    if (!rendered.has(app.id) && dependenciesSatisfied(app)) {
+      appendAppCard(app, $apps, rendered, dependentsMap);
+    }
   });
 
   return $category;
+}
+
+function appendAppCard(app, $container, rendered, dependentsMap, $insertAfter) {
+  if (rendered.has(app.id) || !dependenciesSatisfied(app)) {
+    return $insertAfter || null;
+  }
+
+  const $card = buildAppCard(app);
+  if ($insertAfter) {
+    $card.insertAfter($insertAfter);
+  } else {
+    $container.append($card);
+  }
+  rendered.add(app.id);
+
+  let anchor = $card;
+  const dependents = dependentsMap.get(app.id) || [];
+  dependents.forEach((dependent) => {
+    if (!rendered.has(dependent.id) && dependenciesSatisfied(dependent)) {
+      anchor = appendAppCard(
+        dependent,
+        $container,
+        rendered,
+        dependentsMap,
+        anchor
+      );
+    }
+  });
+
+  return anchor;
 }
 
 function buildAppCard(app) {
@@ -430,6 +505,18 @@ function getAppState(app) {
   return state.appState.get(app.id);
 }
 
+function enforceDependencies() {
+  let changed = false;
+  state.selections.forEach((_value, appId) => {
+    const app = appIndex.get(appId);
+    if (!app || !dependenciesSatisfied(app)) {
+      state.selections.delete(appId);
+      changed = true;
+    }
+  });
+  return changed;
+}
+
 function updateVersion(appId, value) {
   const app = appIndex.get(appId);
   if (!app) return;
@@ -477,22 +564,42 @@ function buildScript() {
 
     const versionValue = getVersionValue(methodConfig, version);
     const resolvedCommand = resolveCommand(methodConfig.command, versionValue);
-    const commandWithComment = `echo "Instalando ${app.name} (${methodConfig.label})"\n${resolvedCommand}`;
-
+    const step = {
+      label: `${app.name} (${methodConfig.label})`,
+      command: resolvedCommand,
+    };
     if (method === "apt") {
-      aptCommands.push(commandWithComment);
+      aptCommands.push(step);
     } else if (method === "snap") {
-      snapCommands.push(commandWithComment);
+      snapCommands.push(step);
     } else if (method === "flatpak") {
-      flatpakCommands.push(commandWithComment);
+      flatpakCommands.push(step);
     } else {
-      customCommands.push(commandWithComment);
+      customCommands.push(step);
     }
   });
 
   const lines = [
     "#!/bin/bash",
     "set -euo pipefail",
+    "",
+    "successes=()",
+    "failures=()",
+    "",
+    "run_step() {",
+    '  local label="$1"',
+    "  local tmp_file",
+    "  tmp_file=$(mktemp)",
+    "  cat > \"$tmp_file\"",
+    '  echo "[brpacks] Executando: $label"',
+    "  if bash \"$tmp_file\"; then",
+    "    successes+=(\"$label\")",
+    "  else",
+    "    failures+=(\"$label\")",
+    "  fi",
+    "  rm -f \"$tmp_file\"",
+    "  echo",
+    "}",
     "",
     'echo "----- brpacks installer -----"',
     'echo "Aplicando atualizações e preparando dependências"',
@@ -505,47 +612,79 @@ function buildScript() {
     flatpakCommands.length > 0;
 
   if (needsAptPrep) {
-    lines.push('echo "Atualizando repositórios APT e instalando bases"');
-    lines.push("sudo apt update");
     lines.push(
-      "sudo apt install -y ca-certificates curl software-properties-common gnupg"
+      createRunStep(
+        "Atualizar APT e dependências",
+        `sudo apt update
+sudo apt install -y ca-certificates curl software-properties-common gnupg`
+      ),
+      ""
     );
-    lines.push("");
   }
 
-  if (aptCommands.length) {
-    aptCommands.forEach((cmd) => lines.push(cmd, ""));
-  }
+  aptCommands.forEach((step) => {
+    lines.push(createRunStep(step.label, step.command), "");
+  });
 
   if (snapCommands.length) {
-    lines.push("if ! command -v snap >/dev/null 2>&1; then");
-    lines.push('  echo "Instalando snapd..."');
-    lines.push("  sudo apt install -y snapd");
-    lines.push("  sudo systemctl enable --now snapd.socket");
-    lines.push("fi");
-    lines.push("");
-    snapCommands.forEach((cmd) => lines.push(cmd, ""));
+    lines.push(
+      createRunStep(
+        "Preparar snapd",
+        `if ! command -v snap >/dev/null 2>&1; then
+  sudo apt install -y snapd
+  sudo systemctl enable --now snapd.socket
+fi`
+      ),
+      ""
+    );
+    snapCommands.forEach((step) => {
+      lines.push(createRunStep(step.label, step.command), "");
+    });
   }
 
   if (flatpakCommands.length) {
-    lines.push("if ! command -v flatpak >/dev/null 2>&1; then");
-    lines.push('  echo "Instalando flatpak..."');
-    lines.push("  sudo apt install -y flatpak");
-    lines.push("fi");
     lines.push(
-      "sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo"
+      createRunStep(
+        "Preparar flatpak",
+        `if ! command -v flatpak >/dev/null 2>&1; then
+  sudo apt install -y flatpak
+fi
+sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo`
+      ),
+      ""
     );
-    lines.push("");
-    flatpakCommands.forEach((cmd) => lines.push(cmd, ""));
+    flatpakCommands.forEach((step) => {
+      lines.push(createRunStep(step.label, step.command), "");
+    });
   }
 
   if (customCommands.length) {
     lines.push("# Bloco de comandos personalizados");
-    customCommands.forEach((cmd) => lines.push(cmd, ""));
+    customCommands.forEach((step) => {
+      lines.push(createRunStep(step.label, step.command), "");
+    });
   }
 
-  lines.push('echo "Instalação concluída!"');
+  lines.push(
+    'echo "Instalação concluída!"',
+    'echo "-------------------------"',
+    'echo "Sucessos: ${#successes[@]}"',
+    'for item in "${successes[@]}"; do',
+    '  echo "  ✓ $item"',
+    "done",
+    'echo "Falhas: ${#failures[@]}"',
+    'for item in "${failures[@]}"; do',
+    '  echo "  ✗ $item"',
+    "done"
+  );
   return lines.join("\n");
+}
+
+function createRunStep(label, commandBody) {
+  const safeLabel = label.replace(/"/g, '\\"');
+  return `run_step "${safeLabel}" <<'BRCMD'
+${commandBody}
+BRCMD`;
 }
 
 function getVersionValue(methodConfig, versionSelection) {

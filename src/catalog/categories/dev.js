@@ -8,6 +8,8 @@ import DockerApp from "../apps/dev/Docker.js";
 import DockerComposeApp from "../apps/dev/DockerCompose.js";
 import NvmApp from "../apps/dev/Nvm.js";
 import ZshApp from "../apps/dev/Zsh.js";
+import YarnApp from "../apps/dev/Yarn.js";
+import OhMyZshApp from "../apps/dev/OhMyZsh.js";
 
 export const title = "Dev & DevOps";
 export const categoryIcon = icon("github");
@@ -20,6 +22,8 @@ const apps = [
   new DockerComposeApp(),
   new NvmApp(),
   new ZshApp(),
+  new YarnApp(),
+  new OhMyZshApp(),
 ];
 
 export default new CategoryDefinition({

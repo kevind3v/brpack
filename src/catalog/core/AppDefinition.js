@@ -1,5 +1,5 @@
 export default class AppDefinition {
-  constructor({ id, name, description, icon, options }) {
+  constructor({ id, name, description, icon, options, dependencies = [] }) {
     if (!id || !name) {
       throw new Error("AppDefinition requer id e name");
     }
@@ -8,6 +8,7 @@ export default class AppDefinition {
     this.description = description ?? "";
     this.icon = icon ?? null;
     this.options = options ?? {};
+    this.dependencies = dependencies;
   }
 
   handler() {
@@ -17,6 +18,7 @@ export default class AppDefinition {
       description: this.description,
       icon: this.icon,
       options: this.options,
+      dependencies: this.dependencies,
     };
   }
 }
